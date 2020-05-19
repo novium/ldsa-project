@@ -1,0 +1,87 @@
+#
+# Based on https://jupyter-docker-stacks.readthedocs.io/en/latest/using/recipes.html#spark
+# Basically, it should run a Jupyter notebook with the Spark cluster on YARN
+# Pretty cool! And way better for our small-ish usecase (so without using
+# jupyter enterprise gateway).
+#
+
+FROM jupyter/pyspark-notebook:3b1f4f5e6cc1
+
+USER root
+RUN apt-get clean && apt-get autoclean && apt-get update && apt-get upgrade && apt-get install -y --no-install-recommends \
+      openjdk-8-jdk \
+      net-tools \
+      curl \
+      netcat \
+      gnupg
+
+ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
+
+RUN curl -O https://dist.apache.org/repos/dist/release/hadoop/common/KEYS
+
+RUN gpg --import KEYS
+
+ENV HADOOP_VERSION 3.2.1
+ENV HADOOP_URL https://www.apache.org/dist/hadoop/common/hadoop-$HADOOP_VERSION/hadoop-$HADOOP_VERSION.tar.gz
+
+RUN set -x \
+    && curl -fSL "$HADOOP_URL" -o /tmp/hadoop.tar.gz \
+    && curl -fSL "$HADOOP_URL.asc" -o /tmp/hadoop.tar.gz.asc \
+    && gpg --verify /tmp/hadoop.tar.gz.asc \
+    && tar -xvf /tmp/hadoop.tar.gz -C /opt/ \
+    && rm /tmp/hadoop.tar.gz*
+
+RUN ln -s /opt/hadoop-$HADOOP_VERSION/etc/hadoop /etc/hadoop
+
+RUN mkdir /opt/hadoop-$HADOOP_VERSION/logs
+
+RUN mkdir /hadoop-data
+
+ENV HADOOP_HOME=/opt/hadoop-$HADOOP_VERSION
+ENV HADOOP_CONF_DIR=/etc/hadoop
+ENV MULTIHOMED_NETWORK=1
+ENV USER=root
+ENV PATH $HADOOP_HOME/bin/:$PATH
+
+
+# Install os dependencies required for pydoop, pyhive
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y build-essential python-dev libsasl2-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+# Remove the example hadoop configs and replace
+# with those for our cluster.
+# Alternatively this could be mounted as a volume
+    rm -f /usr/local/hadoop-$HADOOP_VERSION/etc/hadoop/*
+
+# Download this from ambari / cloudera manager and copy here
+
+# Spark-Submit doesn't work unless I set the following
+RUN echo "spark.driver.extraJavaOptions -Dhdp.version=2.5.3.0-37" >> /usr/local/spark/conf/spark-defaults.conf  && \
+    echo "spark.yarn.am.extraJavaOptions -Dhdp.version=2.5.3.0-37" >> /usr/local/spark/conf/spark-defaults.conf && \
+    echo "spark.master=yarn" >>  /usr/local/spark/conf/spark-defaults.conf && \
+    echo "spark.hadoop.yarn.timeline-service.enabled=false" >> /usr/local/spark/conf/spark-defaults.conf && \
+    chown -R $NB_USER:users /usr/local/spark/conf/spark-defaults.conf && \
+    # Create an alternative HADOOP_CONF_HOME so we can mount as a volume and repoint
+    # using ENV var if needed
+    mkdir -p /etc/hadoop/conf/ && \
+    chown $NB_USER:users /etc/hadoop/conf/
+
+USER $NB_USER
+
+# Install useful jupyter extensions and python libraries like :
+# - Dashboards
+# - PyDoop
+# - PyHive
+RUN pip install jupyter_dashboards faker && \
+    jupyter dashboards quick-setup --sys-prefix && \
+    pip2 install pyhive pydoop thrift sasl thrift_sasl faker
+
+USER root
+# Ensure we overwrite the kernel config so that toree connects to cluster
+RUN jupyter toree install --sys-prefix --spark_opts="--master yarn --deploy-mode client --driver-memory 512m  --executor-memory 512m  --executor-cores 1 --driver-java-options -Dhdp.version=2.5.3.0-37 --conf spark.hadoop.yarn.timeline-service.enabled=false"
+USER $NB_USER
+
+ADD entrypoint.sh /entrypoint.sh
+RUN chmod a+x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

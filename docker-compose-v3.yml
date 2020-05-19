@@ -1,0 +1,145 @@
+version: '3'
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    networks:
+      - hbase
+      - traefik_internal
+    volumes:
+      - namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=ldfs
+    env_file:
+      - ./hadoop.env
+    ports:
+      - 9870:9870
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        traefik.docker.network: traefik_internal
+        traefik.port: 9870
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    networks:
+      - hbase
+      - traefik_internal
+    volumes:
+      - datanode:/hadoop/dfs/data
+    env_file:
+      - ./hadoop.env
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    ports:
+      - 9864:9864
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+      labels:
+        traefik.docker.network: traefik_internal
+        traefik.port: 9864
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    networks:
+      - hbase
+      - traefik_internal
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864"
+    env_file:
+      - ./hadoop.env
+    ports:
+      - 8088:8088
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        traefik.docker.network: traefik_internal
+        traefik.port: 8088
+    healthcheck:
+      disable: true
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    networks:
+      - hbase
+      - traefik_internal
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    ports:
+      - 8042:8042
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+      labels:
+        traefik.docker.network: traefik_internal
+        traefik.port: 8042
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    networks:
+      - hbase
+      - traefik_internal
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    ports: 
+      - 8188:8188
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        traefik.docker.network: traefik_internal
+        traefik.port: 8188
+  
+  spark:
+    image: noviom/ldsa:v11
+    user: root
+    networks:
+      - hbase
+      - traefik_internal
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    ports:
+      - 8888:8888
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+
+volumes:
+  datanode:
+  namenode:
+  hadoop_historyserver:
+
+networks:
+  hbase:
+  traefik_internal:
+          external: true
