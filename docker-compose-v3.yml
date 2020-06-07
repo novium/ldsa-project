@@ -73,7 +73,7 @@ services:
       disable: true
 
   nodemanager:
-    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    image: noviom/nodemanager:v01 
     networks:
       - hbase
       - traefik_internal
@@ -115,7 +115,7 @@ services:
         traefik.port: 8188
   
   spark:
-    image: noviom/ldsa:v11
+    image: noviom/ldsa:v15
     user: root
     networks:
       - hbase
@@ -132,6 +132,21 @@ services:
       placement:
         constraints:
           - node.role == manager
+  traefik:
+    image: 'traefik:v2.2'
+    command: --api.insecure=true --providers.docker --providers.docker.swarmMode=true
+    ports:
+      - 80:80
+      - 8080:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hbase
+      - traefik_internal
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
 
 
 volumes:
@@ -142,4 +157,4 @@ volumes:
 networks:
   hbase:
   traefik_internal:
-          external: true
+    external: true
